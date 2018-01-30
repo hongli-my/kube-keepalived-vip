@@ -65,15 +65,17 @@ type podInfo struct {
 	PodName      string
 	PodNamespace string
 	NodeIP       string
+	NodeName     string
 }
 
 // getPodDetails  returns runtime information about the pod: name, namespace and IP of the node
 func getPodDetails(kubeClient *unversioned.Client) (*podInfo, error) {
 	podName := os.Getenv("POD_NAME")
 	podNs := os.Getenv("POD_NAMESPACE")
+	nodeName := os.Getenv("NODE_NAME")
 
-	if podName == "" || podNs == "" {
-		return nil, fmt.Errorf("Please check the manifest (for missing POD_NAME or POD_NAMESPACE env variables)")
+	if podName == "" || podNs == "" || nodeName == "" {
+		return nil, fmt.Errorf("Please check the manifest (for missing POD_NAME or POD_NAMESPACE or NODE_NAME env variables)")
 	}
 
 	err := waitForPodRunning(kubeClient, podNs, podName, time.Millisecond*200, time.Second*30)
@@ -109,6 +111,7 @@ func getPodDetails(kubeClient *unversioned.Client) (*podInfo, error) {
 		PodName:      podName,
 		PodNamespace: podNs,
 		NodeIP:       externalIP,
+		NodeName:     nodeName,
 	}, nil
 }
 
@@ -270,15 +273,16 @@ func parseNsName(input string) (string, string, error) {
 	return nsName[0], nsName[1], nil
 }
 
-func parseNsSvcLVS(input string) (string, string, string, error) {
+func parseNsSvcLVS(input string) (string, string, string, bool, error) {
 	nsSvcLb := nsSvcLbRegex.FindStringSubmatch(input)
 	if len(nsSvcLb) != 6 {
-		return "", "", "", fmt.Errorf("invalid format (namespace/service name[:NAT|DR]) found in '%v'", input)
+		return "", "", "", false, fmt.Errorf("invalid format (namespace/service name[:NAT|DR]) found in '%v'", input)
 	}
 
 	ns := nsSvcLb[1]
 	svc := nsSvcLb[2]
 	kind := nsSvcLb[3]
+	notRouted := false
 
 	if ns == "" {
 		ns = nsSvcLb[4]
@@ -293,10 +297,14 @@ func parseNsSvcLVS(input string) (string, string, string, error) {
 	}
 
 	if !lvsRegex.MatchString(kind) {
-		return "", "", "", fmt.Errorf("invalid LVS method. Only NAT and DR are supported: %v", kind)
+		if kind == "notRouted" {
+			notRouted = true
+			kind = "NAT"
+		}
+		//return "", "", "", fmt.Errorf("invalid LVS method. Only NAT and DR are supported: %v", kind)
 	}
 
-	return ns, svc, kind, nil
+	return ns, svc, kind, notRouted, nil
 }
 
 type nodeSelector map[string]string

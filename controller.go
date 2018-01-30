@@ -33,6 +33,7 @@ import (
 	"k8s.io/kubernetes/pkg/client/cache"
 	"k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
+	"k8s.io/kubernetes/pkg/labels"
 	utildbus "k8s.io/kubernetes/pkg/util/dbus"
 	"k8s.io/kubernetes/pkg/util/exec"
 	"k8s.io/kubernetes/pkg/util/flowcontrol"
@@ -114,6 +115,7 @@ type ipvsControllerController struct {
 	configMapName     string
 	ruCfg             []vip
 	ruMD5             string
+	nodeName          string
 
 	// stopLock is used to enforce only a single call to Stop is active.
 	// Needed because we allow stopping through an http endpoint and
@@ -169,8 +171,10 @@ func (ipvsc *ipvsControllerController) getServices(cfgMap *api.ConfigMap) []vip 
 	svcs := []vip{}
 
 	// k -> IP to use
-	// v -> <namespace>/<service name>:<lvs method>
+	// v -> <namespace>/<service name>:<lvs method>:<notRouted flag>
 	for externalIP, nsSvcLvs := range cfgMap.Data {
+		// TODO: bind vip to random node, How can we use it. so remove it
+		// MayBe only one condition: deploy pod use daemonset and hostNetwork
 		if nsSvcLvs == "" {
 			// if target is empty string we will not forward to any service but
 			// instead just configure the IP on the machine and let it up to
@@ -187,7 +191,7 @@ func (ipvsc *ipvsControllerController) getServices(cfgMap *api.ConfigMap) []vip 
 			continue
 		}
 
-		ns, svc, lvsm, err := parseNsSvcLVS(nsSvcLvs)
+		ns, svc, lvsm, notRouted, err := parseNsSvcLVS(nsSvcLvs)
 		if err != nil {
 			glog.Warningf("%v", err)
 			continue
@@ -206,6 +210,34 @@ func (ipvsc *ipvsControllerController) getServices(cfgMap *api.ConfigMap) []vip 
 		}
 
 		s := svcObj.(*api.Service)
+
+		if notRouted {
+			podList, err := ipvsc.client.Pods(ns).List(api.ListOptions{
+				LabelSelector: labels.SelectorFromSet(s.Spec.Selector),
+			})
+			if err != nil {
+				glog.Warningf("no Pod found for service %v", s.Name)
+				continue
+			}
+			for _, pod := range podList.Items {
+				glog.V(2).Infof("Pod Info %v, %v, %v", pod.Spec.NodeName, pod.Name, pod.Namespace)
+				if ipvsc.nodeName == pod.Spec.NodeName {
+					svcs = append(svcs, vip{
+						Name:      "",
+						IP:        externalIP,
+						Port:      0,
+						LVSMethod: "VIP",
+						Backends:  nil,
+						Protocol:  "TCP",
+					})
+					glog.V(2).Infof("Adding VIP only service: %v", externalIP)
+					// we think all pod belong to deployment/rc/statefulset schedule to different node
+					break
+				}
+			}
+			continue
+		}
+
 		for _, servicePort := range s.Spec.Ports {
 			ep := ipvsc.getEndpoints(s, &servicePort)
 			if len(ep) == 0 {
@@ -313,6 +345,7 @@ func newIPVSController(kubeClient *unversioned.Client, namespace string, useUnic
 	if err != nil {
 		glog.Fatalf("Error getting POD information: %v", err)
 	}
+	ipvsc.nodeName = podInfo.NodeName
 
 	pod, err := kubeClient.Pods(podInfo.PodNamespace).Get(podInfo.PodName)
 	if err != nil {

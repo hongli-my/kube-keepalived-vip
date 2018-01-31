@@ -5,6 +5,7 @@ global_defs {
   vrrp_iptables {{ .iptablesChain }}
 }
 
+{{ if gt (len .vips) 0 }}
 vrrp_instance vips {
   state BACKUP
   interface {{ $iface }}
@@ -28,6 +29,7 @@ vrrp_instance vips {
     {{ . }}{{ end }}
   }
 }
+{{ end }}
 
 {{ range $i, $svc := .svcs }}
 {{ if eq $svc.LVSMethod "VIP" }}

@@ -135,6 +135,8 @@ func (k *keepalived) Reload() error {
 	}
 
 	glog.Info("reloading keepalived")
+	// This causes keepalived to close down all interfaces, reload its configuration, and start up with the new configuration
+	// Refer to: https://www.mankier.com/8/keepalived#--signum
 	err := syscall.Kill(k.cmd.Process.Pid, syscall.SIGHUP)
 	if err != nil {
 		return fmt.Errorf("error reloading keepalived: %v", err)

@@ -5,12 +5,12 @@ global_defs {
   vrrp_iptables {{ .iptablesChain }}
 }
 
-{{ if gt (len .vips) 0 }}
-vrrp_instance vips {
+{{ range $i, $vip := .vips }}
+vrrp_instance {{ Name $i }} {
   state BACKUP
   interface {{ $iface }}
-  virtual_router_id {{ .vrid }}
-  priority {{ .priority }}
+  virtual_router_id {{ Add $.vrid $i }}
+  priority {{ $.priority }}
   nopreempt
   advert_int 1
 
@@ -18,15 +18,15 @@ vrrp_instance vips {
     {{ $iface }}
   }
 
-  {{ if .useUnicast }}
+  {{ if $.useUnicast }}
   unicast_src_ip {{ .myIP }}
   unicast_peer { {{ range .nodes }}
     {{ . }}{{ end }}
   }
   {{ end }}
 
-  virtual_ipaddress { {{ range .vips }}
-    {{ . }}{{ end }}
+  virtual_ipaddress {
+    {{ $vip }}
   }
 }
 {{ end }}

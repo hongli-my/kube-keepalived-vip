@@ -182,7 +182,16 @@ func (k *keepalived) removeVIP(vip string) error {
 }
 
 func (k *keepalived) loadTemplate() error {
-	tmpl, err := template.ParseFiles(keepalivedTmpl)
+	// TODO: virtual_router_id maybe depend on vip, ps. last 8bit
+	funcMap := template.FuncMap{
+		"Add": func(i int, j int) int {
+			return i + j
+		},
+		"Name": func(i int) string {
+			return fmt.Sprintf("%s%d", "vips-", i)
+		},
+	}
+	tmpl, err := template.New("keepalived.tmpl").Funcs(funcMap).ParseFiles(keepalivedTmpl)
 	if err != nil {
 		return err
 	}
